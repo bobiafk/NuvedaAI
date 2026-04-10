@@ -1,146 +1,29 @@
 "use client";
 
-import { useState, useRef } from "react";
-
-const TALLY_FORM_ID = process.env.NEXT_PUBLIC_TALLY_FORM_ID ?? "";
-const TALLY_SCRIPT = "https://tally.so/widgets/embed.js";
-
-function styleTallyPopup() {
-  const observer = new MutationObserver((mutations) => {
-    for (const m of mutations) {
-      for (const node of m.addedNodes) {
-        if (!(node instanceof HTMLElement)) continue;
-
-        const iframe = node.querySelector?.('iframe[src*="tally.so"]') as HTMLIFrameElement | null;
-        if (!iframe) continue;
-
-        observer.disconnect();
-
-        const overlay = iframe.closest("div[style]")?.parentElement ?? node;
-
-        Object.assign(overlay.style, {
-          background: "rgba(10, 6, 18, 0.8)",
-          backdropFilter: "blur(16px) saturate(120%)",
-          WebkitBackdropFilter: "blur(16px) saturate(120%)",
-          transition: "opacity 0.3s ease",
-        });
-
-        const container = iframe.parentElement;
-        if (container) {
-          Object.assign(container.style, {
-            borderRadius: "20px",
-            overflow: "hidden",
-            boxShadow:
-              "0 0 0 1px rgba(111,47,255,0.2), 0 32px 80px -12px rgba(0,0,0,0.7), 0 0 80px -20px rgba(111,47,255,0.25)",
-            transform: "translateY(0)",
-            animation: "none",
-          });
-          container.animate(
-            [
-              { opacity: 0, transform: "translateY(20px) scale(0.97)" },
-              { opacity: 1, transform: "translateY(0) scale(1)" },
-            ],
-            { duration: 400, easing: "cubic-bezier(0.16,1,0.3,1)", fill: "forwards" }
-          );
-        }
-
-        iframe.style.borderRadius = "20px";
-
-        const closeBtn = overlay.querySelector("button") ?? overlay.querySelector("[class*=close]");
-        if (closeBtn instanceof HTMLElement) {
-          Object.assign(closeBtn.style, {
-            background: "rgba(30, 18, 56, 0.9)",
-            border: "1px solid rgba(111,47,255,0.3)",
-            borderRadius: "12px",
-            color: "#aa80ff",
-            backdropFilter: "blur(8px)",
-            width: "36px",
-            height: "36px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            transition: "all 0.2s ease",
-            cursor: "pointer",
-          });
-          closeBtn.addEventListener("mouseenter", () => {
-            closeBtn.style.background = "rgba(111,47,255,0.35)";
-            closeBtn.style.color = "#fff";
-          });
-          closeBtn.addEventListener("mouseleave", () => {
-            closeBtn.style.background = "rgba(30,18,56,0.9)";
-            closeBtn.style.color = "#aa80ff";
-          });
-        }
-
-        return;
-      }
-    }
-  });
-
-  observer.observe(document.body, { childList: true, subtree: true });
-  setTimeout(() => observer.disconnect(), 5000);
-}
-
-function loadTallyScript(): Promise<void> {
-  return new Promise((resolve) => {
-    if (window.Tally) {
-      resolve();
-      return;
-    }
-    if (document.querySelector(`script[src="${TALLY_SCRIPT}"]`)) {
-      const check = setInterval(() => {
-        if (window.Tally) { clearInterval(check); resolve(); }
-      }, 50);
-      return;
-    }
-    const script = document.createElement("script");
-    script.src = TALLY_SCRIPT;
-    script.onload = () => resolve();
-    script.onerror = () => resolve();
-    document.body.appendChild(script);
-  });
-}
+import { useState, type FormEvent } from "react";
+import { subscribe } from "@/app/actions/subscribe";
 
 export default function EmailForm() {
-  const [status, setStatus] = useState<"idle" | "loading" | "success">("idle");
-  const submittedRef = useRef(false);
+  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [email, setEmail] = useState("");
+  const [focused, setFocused] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
 
-  async function handleClick() {
-    if (status === "loading") return;
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!email || status === "loading") return;
 
     setStatus("loading");
-    submittedRef.current = false;
+    setErrorMsg("");
 
-    if (TALLY_FORM_ID) {
-      await loadTallyScript();
+    const result = await subscribe(email);
 
-      if (window.Tally) {
-        styleTallyPopup();
-        window.Tally.openPopup(TALLY_FORM_ID, {
-          layout: "modal",
-          width: 400,
-          hideTitle: true,
-          overlay: true,
-          autoClose: 2000,
-          customFormUrl: `https://tally.so/embed/${TALLY_FORM_ID}?transparentBackground=1&hideTitle=1`,
-          onOpen: () => {
-            setStatus("idle");
-          },
-          onSubmit: () => {
-            submittedRef.current = true;
-            setStatus("success");
-          },
-          onClose: () => {
-            if (!submittedRef.current) {
-              setStatus("idle");
-            }
-          },
-        });
-        return;
-      }
+    if (result.success) {
+      setStatus("success");
+    } else {
+      setErrorMsg(result.error ?? "Something went wrong.");
+      setStatus("error");
     }
-
-    setStatus("idle");
   }
 
   if (status === "success") {
@@ -195,22 +78,59 @@ export default function EmailForm() {
   }
 
   return (
-    <button
-      onClick={handleClick}
-      disabled={status === "loading"}
-      className="group/btn relative h-14 cursor-pointer overflow-hidden whitespace-nowrap rounded-2xl bg-brand-accent px-10 font-body text-sm font-semibold tracking-wide text-white transition-all duration-300 hover:shadow-[0_0_40px_rgba(111,47,255,0.5)] active:scale-[0.97] disabled:cursor-wait"
-    >
-      <span className="relative z-10">
-        {status === "loading" ? (
-          <span className="flex items-center gap-2">
-            <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-            Loading…
-          </span>
-        ) : (
-          "Be First to Know"
-        )}
-      </span>
-      <span className="absolute inset-0 bg-linear-to-r from-brand-accent to-[#9055ff] opacity-0 transition-opacity duration-300 group-hover/btn:opacity-100" />
-    </button>
+    <div className="flex flex-col gap-4">
+      <form
+        onSubmit={handleSubmit}
+        className="group relative flex flex-col gap-3 sm:flex-row sm:gap-0"
+      >
+        <div
+          className="relative flex flex-col rounded-2xl p-px sm:flex-row transition-all duration-500"
+          style={{
+            background: focused
+              ? "linear-gradient(135deg, #6f2fff 0%, #aa80ff 50%, #6f2fff 100%)"
+              : "linear-gradient(135deg, #3d2e5c 0%, #1e1238 50%, #3d2e5c 100%)",
+          }}
+        >
+          <div className="flex flex-col rounded-[calc(1rem-1px)] bg-brand-darker sm:flex-row">
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
+              placeholder="Enter your email"
+              disabled={status === "loading"}
+              className="h-14 w-full bg-transparent px-6 font-body text-sm font-light text-brand-text outline-none placeholder:text-brand-muted disabled:opacity-50 sm:w-72 md:w-80"
+            />
+            <button
+              type="submit"
+              disabled={status === "loading"}
+              className="group/btn relative h-14 cursor-pointer overflow-hidden whitespace-nowrap rounded-b-[calc(1rem-1px)] bg-brand-accent px-8 font-body text-sm font-semibold tracking-wide text-white transition-all duration-300 hover:shadow-[0_0_32px_rgba(111,47,255,0.5)] active:scale-[0.98] disabled:cursor-wait sm:rounded-none sm:rounded-r-[calc(1rem-1px)]"
+            >
+              <span className="relative z-10">
+                {status === "loading" ? (
+                  <span className="flex items-center gap-2">
+                    <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                    Joining…
+                  </span>
+                ) : (
+                  "Be First to Know"
+                )}
+              </span>
+              <span className="absolute inset-0 bg-linear-to-r from-brand-accent to-[#9055ff] opacity-0 transition-opacity duration-300 group-hover/btn:opacity-100" />
+            </button>
+          </div>
+        </div>
+      </form>
+      {status === "error" && errorMsg && (
+        <p className="animate-fade-up font-body text-[0.75rem] font-light text-red-400">
+          {errorMsg}
+        </p>
+      )}
+      <p className="font-body text-[0.7rem] font-light text-brand-dim">
+        No spam. Unsubscribe anytime.
+      </p>
+    </div>
   );
 }

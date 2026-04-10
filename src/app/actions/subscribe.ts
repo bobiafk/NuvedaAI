@@ -1,27 +1,6 @@
 "use server";
 
-import { promises as fs } from "fs";
-import path from "path";
-
-const WAITLIST_PATH = path.join(process.cwd(), "waitlist.json");
-
-interface WaitlistEntry {
-  email: string;
-  subscribedAt: string;
-}
-
-async function readWaitlist(): Promise<WaitlistEntry[]> {
-  try {
-    const data = await fs.readFile(WAITLIST_PATH, "utf-8");
-    return JSON.parse(data);
-  } catch {
-    return [];
-  }
-}
-
-async function writeWaitlist(entries: WaitlistEntry[]) {
-  await fs.writeFile(WAITLIST_PATH, JSON.stringify(entries, null, 2), "utf-8");
-}
+const LOOPS_API_KEY = process.env.LOOPS_API_KEY ?? "";
 
 export async function subscribe(
   email: string
@@ -32,17 +11,25 @@ export async function subscribe(
     return { success: false, error: "Please enter a valid email address." };
   }
 
+  if (!LOOPS_API_KEY) {
+    return { success: false, error: "Something went wrong. Please try again." };
+  }
+
   try {
-    const entries = await readWaitlist();
+    const res = await fetch("https://app.loops.so/api/v1/contacts/create", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${LOOPS_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ email: trimmed, source: "waitlist" }),
+    });
 
-    if (entries.some((e) => e.email === trimmed)) {
-      return { success: true };
-    }
+    const data = await res.json();
 
-    entries.push({ email: trimmed, subscribedAt: new Date().toISOString() });
-    await writeWaitlist(entries);
-
-    return { success: true };
+    if (data.success) return { success: true };
+    if (res.status === 409) return { success: true };
+    return { success: false, error: "Something went wrong. Please try again." };
   } catch {
     return { success: false, error: "Something went wrong. Please try again." };
   }
